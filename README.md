@@ -65,3 +65,4 @@ test/             auth, orders, customers, webhooks, rate limit, focus, AI proxy
 
 ## Screens (design mockups)
 ![relay-1-api](docs/relay-1-api.jpg)
+![relay-2-paging](docs/relay-2-paging.jpg)
