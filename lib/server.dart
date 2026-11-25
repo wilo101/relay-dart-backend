@@ -1,69 +1,82 @@
-import 'dart:convert';
 import 'package:shelf/shelf.dart';
 import 'package:shelf_cors_headers/shelf_cors_headers.dart';
 import 'package:shelf_router/shelf_router.dart';
 import 'ai.dart';
 import 'auth.dart';
+import 'middleware/auth_guard.dart';
+import 'middleware/rate_limit.dart';
+import 'middleware/request_id.dart';
+import 'routes/admin.dart';
+import 'routes/customers.dart';
+import 'routes/focus.dart';
+import 'routes/orders.dart';
+import 'routes/webhooks.dart';
+import 'services/webhooks.dart';
 import 'store.dart';
+import 'validation.dart';
 
-Response _json(Object body, [int status = 200]) =>
-    Response(status, body: jsonEncode(body), headers: {'content-type': 'application/json'});
+const apiVersion = '2.0.0';
 
-Handler buildHandler(Store store, Auth auth, AiProxy ai) {
+Handler buildHandler(
+  Store store,
+  Auth auth,
+  AiProxy ai, {
+  WebhookDispatcher? hooks,
+  RateLimiter? limiter,
+}) {
+  final dispatcher = hooks ?? WebhookDispatcher(store);
   final router = Router();
 
-  router.get('/health', (Request r) => _json({'ok': true}));
+  router.get('/health', (Request r) => jsonResponse({'ok': true, 'version': apiVersion}));
 
   router.post('/auth/login', (Request r) async {
-    final b = jsonDecode(await r.readAsString()) as Map<String, dynamic>;
-    final t = auth.login('${b['username']}', '${b['password']}');
-    return t == null ? _json({'error': 'invalid credentials'}, 401) : _json({'token': t});
-  });
-
-  router.get('/orders', (Request r) {
-    final status = r.url.queryParameters['status'];
-    final q = (r.url.queryParameters['q'] ?? '').toLowerCase();
-    final list = store.orders
-        .where((o) => (status == null || o['status'] == status) && '${o['customer']}'.toLowerCase().contains(q))
-        .toList();
-    return _json(list);
-  });
-
-  router.post('/orders', (Request r) async {
-    final b = jsonDecode(await r.readAsString()) as Map<String, dynamic>;
-    final amount = (b['amount'] as num?)?.toDouble();
-    if (b['customer'] == null || amount == null || amount <= 0) {
-      return _json({'error': 'customer and positive amount required'}, 400);
+    final b = await readJson(r);
+    final u = store.userByName('${b['username']}');
+    if (u == null || !auth.checkPassword(u, '${b['password']}')) {
+      return jsonResponse({'error': 'invalid credentials'}, 401);
     }
-    return _json(store.addOrder('${b['customer']}', amount, '${b['status'] ?? 'pending'}'), 201);
+    return jsonResponse({'token': auth.issue(u), 'role': u.role.name});
   });
 
-  router.patch('/orders/<id>', (Request r, String id) async {
-    final b = jsonDecode(await r.readAsString()) as Map<String, dynamic>;
-    final ok = store.updateStatus(int.parse(id), '${b['status']}');
-    return ok ? _json({'ok': true}) : _json({'error': 'not found'}, 404);
+  router.get('/auth/me', (Request r) {
+    final c = claimsOf(r);
+    return jsonResponse({'username': c.sub, 'role': c.role.name, 'expiresAt': c.exp});
   });
 
-  router.get('/stats', (Request r) => _json(store.stats()));
+  router.mount('/orders', ordersRoutes(store, dispatcher).call);
+  router.mount('/customers', customersRoutes(store).call);
+  router.mount('/webhooks', webhooksRoutes(store, dispatcher).call);
+  router.mount('/focus', focusRoutes(store, dispatcher).call);
 
-  router.post('/ai/insights', (Request r) async => _json({'summary': await ai.summarize(store.stats())}));
+  // Admin-only, even for reads.
+  final admin = adminRoutes(store);
+  router.mount('/admin', (Request r) => claimsOf(r).isAdmin ? admin.call(r) : jsonResponse({'error': 'admin role required'}, 403));
 
-  // Focus Desk sync
-  router.get('/focus/sessions', (Request r) => _json(store.sessions));
-  router.post('/focus/sessions', (Request r) async {
-    final b = jsonDecode(await r.readAsString()) as Map<String, dynamic>;
-    store.addSession({'task': b['task'], 'minutes': b['minutes'], 'at': DateTime.now().toUtc().toIso8601String()});
-    return _json({'ok': true}, 201);
+  router.get('/stats', (Request r) {
+    final q = r.url.queryParameters;
+    return jsonResponse(store.stats(from: DateTime.tryParse(q['from'] ?? ''), to: DateTime.tryParse(q['to'] ?? '')));
   });
 
-  const open = {'/health', '/auth/login'};
-  final protected = Pipeline().addMiddleware((inner) => (req) {
-        if (open.contains('/${req.url.path}') || auth.verify(req.headers['authorization'])) return inner(req);
-        return _json({'error': 'unauthorized'}, 401);
-      }).addHandler(router.call);
+  router.post('/ai/insights', (Request r) async => jsonResponse({'summary': await ai.summarize(store.stats())}));
 
   return Pipeline()
       .addMiddleware(corsHeaders())
+      .addMiddleware(requestId())
       .addMiddleware(logRequests())
-      .addHandler(protected);
+      .addMiddleware((limiter ?? RateLimiter()).middleware)
+      .addMiddleware(handleErrors())
+      .addMiddleware(authGuard(auth))
+      .addMiddleware(requireAdminForWrites())
+      .addHandler(router.call);
 }
+
+/// Turns ValidationError and unexpected exceptions into clean JSON responses.
+Middleware handleErrors() => (inner) => (req) async {
+      try {
+        return await inner(req);
+      } on ValidationError catch (e) {
+        return jsonResponse({'error': 'validation failed', 'fields': e.errors}, 400);
+      } catch (e) {
+        return jsonResponse({'error': 'internal error'}, 500);
+      }
+    };
