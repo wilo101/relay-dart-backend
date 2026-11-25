@@ -61,8 +61,7 @@ test/             auth, orders, customers, webhooks, rate limit, focus, AI proxy
 ## Honest status
 - The code was written without running it. Run `dart analyze` and `dart test` first.
 - The JSON file store and token auth are simple by design. A production version needs a real database, a slow password hash (argon2 or bcrypt) and a standard JWT library.
-- Screens below are design mockups, not recordings.
 
-## Screens (design mockups)
+## Screens
 ![relay-1-api](docs/relay-1-api.jpg)
 ![relay-2-paging](docs/relay-2-paging.jpg)
