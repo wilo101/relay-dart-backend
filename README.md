@@ -1,6 +1,6 @@
 # Relay: Dart REST backend (shelf) with auth, orders and an AI proxy
 
-Personal demo project. A small backend written in **Dart** with **shelf** and **shelf_router**. It is the shared backend for three other demos: the **Pulse** Flutter Web dashboard, the **Ledgerline** Dart CLI and the **Focus Desk** Flutter desktop app.
+Personal demo project. A small backend written in **Dart** with **shelf** and **shelf_router**. It is the shared backend for two other demos: the **Pulse** Flutter Web dashboard and the **Focus Desk** Flutter desktop app.
 
 **Tech:** Dart, shelf, shelf_router, REST API, bearer-token auth (HMAC), CORS, JSON file store, OpenAI API proxy with offline fallback, Docker.
 
@@ -32,4 +32,4 @@ Optional: set `OPENAI_API_KEY` for real AI summaries. Without it the endpoint re
 - The JSON file store and token auth are demo-grade. A production version needs a real database, hashed passwords and a standard JWT library.
 
 ## Screens (design mockups, not recordings)
-![relay-1-api](docs/relay-1-api.png)
+![relay-1-api](docs/relay-1-api.jpg)

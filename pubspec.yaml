@@ -1,5 +1,5 @@
 name: relay
-description: Dart (shelf) REST backend for the Pulse, Ledgerline and Focus Desk demo projects. Auth, orders, stats, focus sessions and a secure AI proxy.
+description: Dart (shelf) REST backend for the Pulse and Focus Desk demo projects. Auth, orders, stats, focus sessions and a secure AI proxy.
 publish_to: none
 version: 1.0.0
 environment:
